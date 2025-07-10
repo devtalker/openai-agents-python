@@ -1,7 +1,67 @@
+"""
+Stream Items Example with Custom Model Configuration
+
+This example demonstrates how to use streaming events with a custom model provider.
+Before running this example, you need to create a .env file in this directory with the following variables:
+
+MODEL_API_KEY=your_api_key_here
+MODEL_BASE_URL=https://api.openai.com/v1  
+MODEL_NAME=gpt-4o-mini
+
+Example configurations for different providers:
+
+OpenAI:
+MODEL_API_KEY=sk-your-openai-api-key
+MODEL_BASE_URL=https://api.openai.com/v1
+MODEL_NAME=gpt-4o-mini
+
+Azure OpenAI:
+MODEL_API_KEY=your-azure-api-key
+MODEL_BASE_URL=https://your-resource.openai.azure.com/openai/deployments/your-deployment-name
+MODEL_NAME=gpt-4
+
+Anthropic Claude (via compatible API):
+MODEL_API_KEY=your-claude-api-key
+MODEL_BASE_URL=https://api.anthropic.com/v1
+MODEL_NAME=claude-3-sonnet-20240229
+"""
+
 import asyncio
 import random
+import os
+from dotenv import load_dotenv
+from openai import AsyncOpenAI
 
-from agents import Agent, ItemHelpers, Runner, function_tool
+from agents import Agent, ItemHelpers, Runner, function_tool, Model, ModelProvider, OpenAIChatCompletionsModel, RunConfig
+from agents.tracing import set_tracing_disabled
+
+# Load environment variables
+load_dotenv()
+set_tracing_disabled(disabled=True)
+
+# Get configuration from environment variables
+MODEL_API_KEY = os.getenv("MODEL_API_KEY")
+MODEL_BASE_URL = os.getenv("MODEL_BASE_URL")
+MODEL_NAME = os.getenv("MODEL_NAME")
+
+# Create custom OpenAI client
+client = AsyncOpenAI(
+    api_key=MODEL_API_KEY,
+    base_url=MODEL_BASE_URL,
+)
+
+
+class CustomModelProvider(ModelProvider):
+    """自定义模型提供器"""
+
+    def get_model(self, model_name: str | None) -> Model:
+        return OpenAIChatCompletionsModel(
+            model=model_name or MODEL_NAME,
+            openai_client=client,
+        )
+
+
+CUSTOM_MODEL_PROVIDER = CustomModelProvider()
 
 
 @function_tool
@@ -19,6 +79,7 @@ async def main():
     result = Runner.run_streamed(
         agent,
         input="Hello",
+        run_config=RunConfig(model_provider=CUSTOM_MODEL_PROVIDER),
     )
     print("=== Run starting ===")
     async for event in result.stream_events():
@@ -42,6 +103,11 @@ async def main():
 
 
 if __name__ == "__main__":
+    # Check if required environment variables are set
+    if not MODEL_API_KEY or not MODEL_BASE_URL or not MODEL_NAME:
+        print("Error: Please set MODEL_API_KEY, MODEL_BASE_URL, and MODEL_NAME in your .env file")
+        exit(1)
+    
     asyncio.run(main())
 
     # === Run starting ===
