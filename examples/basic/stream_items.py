@@ -31,6 +31,7 @@ import random
 import os
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
+from openai.types.responses import ResponseFunctionCallArgumentsDeltaEvent
 
 from agents import Agent, ItemHelpers, Runner, function_tool, Model, ModelProvider, OpenAIChatCompletionsModel, RunConfig
 from agents.tracing import set_tracing_disabled
@@ -66,6 +67,7 @@ CUSTOM_MODEL_PROVIDER = CustomModelProvider()
 
 @function_tool
 def how_many_jokes() -> int:
+    print("how_many_jokes tool called")
     return random.randint(1, 10)
 
 
@@ -85,6 +87,22 @@ async def main():
     async for event in result.stream_events():
         # We'll ignore the raw responses event deltas
         if event.type == "raw_response_event":
+            # Function call started
+            if event.data.type == "response.output_item.added":
+                if getattr(event.data.item, "type", None) == "function_call":
+                    function_name = getattr(event.data.item, "name", "unknown")
+                    print(f"\n📞 Function call streaming started: {function_name}()")
+                    print("📝 Arguments building...")
+
+            # Real-time argument streaming
+            elif isinstance(event.data, ResponseFunctionCallArgumentsDeltaEvent):
+                print(f"   + {event.data.delta}", end="", flush=True)
+
+            # Function call completed
+            elif event.data.type == "response.output_item.done":
+                if hasattr(event.data.item, 'call_id'):
+                    function_name = getattr(event.data.item, "name", "unknown")
+                    print(f"\n✅ Function call streaming completed: {function_name}")
             continue
         elif event.type == "agent_updated_stream_event":
             print(f"Agent updated: {event.new_agent.name}")
