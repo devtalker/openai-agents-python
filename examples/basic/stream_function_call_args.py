@@ -1,20 +1,57 @@
 import asyncio
 from typing import Any
+import os
+from dotenv import load_dotenv
+from openai import AsyncOpenAI
 
+from openai.types import Model
 from openai.types.responses import ResponseFunctionCallArgumentsDeltaEvent
 
 from agents import Agent, Runner, function_tool
+from agents.items import ItemHelpers
+from agents.models.interface import ModelProvider
+from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+from agents.run import RunConfig
+from agents.tracing import set_tracing_disabled
 
+# Load environment variables
+load_dotenv()
+set_tracing_disabled(disabled=True)
+
+# Get configuration from environment variables
+MODEL_API_KEY = os.getenv("MODEL_API_KEY")
+MODEL_BASE_URL = os.getenv("MODEL_BASE_URL")
+MODEL_NAME = os.getenv("MODEL_NAME")
+
+# Create custom OpenAI client
+client = AsyncOpenAI(
+    api_key=MODEL_API_KEY,
+    base_url=MODEL_BASE_URL,
+)
+
+
+class CustomModelProvider(ModelProvider):
+    """自定义模型提供器"""
+
+    def get_model(self, model_name: str | None) -> Model:
+        return OpenAIChatCompletionsModel(
+            model=model_name or MODEL_NAME,
+            openai_client=client,
+        )
+
+CUSTOM_MODEL_PROVIDER = CustomModelProvider()
 
 @function_tool
 def write_file(filename: str, content: str) -> str:
     """Write content to a file."""
+    print(f"write_file called")
     return f"File {filename} written successfully"
 
 
 @function_tool
 def create_config(project_name: str, version: str, dependencies: list[str]) -> str:
     """Create a configuration file for a project."""
+    print(f"create_config called")
     return f"Config for {project_name} v{version} created"
 
 
@@ -35,7 +72,8 @@ async def main():
 
     result = Runner.run_streamed(
         agent,
-        input="Create a Python web project called 'my-app' with FastAPI. Version 1.0.0, dependencies: fastapi, uvicorn"
+        input="Create a Python web project called 'my-app' with FastAPI. Version 1.0.0, dependencies: fastapi, uvicorn",
+        run_config=RunConfig(model_provider=CUSTOM_MODEL_PROVIDER),
     )
 
     # Track function calls for detailed output
@@ -74,6 +112,19 @@ async def main():
                         print()
                         if current_active_call_id == call_id:
                             current_active_call_id = None
+        elif event.type == "agent_updated_stream_event":
+            print(f"Agent updated: {event.new_agent.name}")
+            continue
+        elif event.type == "run_item_stream_event":
+            if event.item.type == "tool_call_item":
+                tool_call_item = event.item
+                print(f"-- Tool was called: {tool_call_item.raw_item.name}")
+            elif event.item.type == "tool_call_output_item":
+                print(f"-- Tool output: {event.item.output}")
+            elif event.item.type == "message_output_item":
+                print(f"-- Message output:\n {ItemHelpers.text_message_output(event.item)}")
+            else:
+                pass  # Ignore other event types
 
     print("Summary of all function calls:")
     for call_id, info in function_calls.items():
